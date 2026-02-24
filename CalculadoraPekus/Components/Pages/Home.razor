@@ -1,0 +1,836 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using CalculadoraPekus.Application.Models;
+@using CalculadoraPekus.Application.Models.Request
+@using CalculadoraPekus.Services
+@inject CalculadoraApiService CalculadoraService
+
+<PageTitle>Calculadora</PageTitle>
+
+<div class="app-wrapper">
+    <section class="card calc-card">
+        <div class="card-header">
+            <div class="header-icon">∑</div>
+            <div>
+                <h1 class="card-title">Calculadora</h1>
+                <p class="card-subtitle">Informe os valores e escolha a operação</p>
+            </div>
+        </div>
+
+        <div class="form-grid">
+            <div class="field-group">
+                <label class="field-label" for="valorA">Valor A</label>
+                <input id="valorA"
+                       class="field-input @(erroValorA != null ? "input-error" : "")"
+                       type="text"
+                       placeholder="Ex: 10.5"
+                       @bind="valorAStr"
+                       @oninput="ValidarA"
+                       autocomplete="off" />
+                @if (erroValorA != null)
+                {
+                    <span class="field-error">⚠ @erroValorA</span>
+                }
+            </div>
+
+            <div class="field-group">
+                <label class="field-label" for="valorB">Valor B</label>
+                <input id="valorB"
+                       class="field-input @(erroValorB != null ? "input-error" : "")"
+                       type="text"
+                       placeholder="Ex: 4.2"
+                       @bind="valorBStr"
+                       @oninput="ValidarB"
+                       autocomplete="off" />
+                @if (erroValorB != null)
+                {
+                    <span class="field-error">⚠ @erroValorB</span>
+                }
+            </div>
+        </div>
+
+        <div class="field-group">
+            <label class="field-label">Operação Matemática</label>
+            <div class="op-buttons">
+                @foreach (var op in new[] { ("+", "Adição", "+"), ("-", "Subtração", "−"), ("*", "Multiplicação", "×"), ("/", "Divisão", "÷") })
+                {
+                    <button class="op-btn @(operacaoSelecionada == op.Item1 ? "op-btn-active" : "")"
+                            @onclick="() => operacaoSelecionada = op.Item1"
+                            title="@op.Item2">
+                        <span class="op-symbol">@op.Item3</span>
+                        <span class="op-label">@op.Item2</span>
+                    </button>
+                }
+            </div>
+            @if (erroOperacao != null)
+            {
+                <span class="field-error">⚠ @erroOperacao</span>
+            }
+        </div>
+        <div class="div-button">
+        <button class="btn-calcular" @onclick="Calcular" disabled="@salvando">
+            @if (salvando)
+            {
+                <span class="spinner-btn"></span>
+                <span>Calculando...</span>
+            }
+            else
+            {
+                <span>Calcular e Salvar</span>
+            }
+        </button>
+        </div>
+
+        @if (mensagemSucesso != null)
+        {
+            <div class="alert alert-success">
+                <span class="alert-icon">✓</span>
+                <span>@mensagemSucesso</span>
+            </div>
+        }
+        @if (mensagemErro != null)
+        {
+            <div class="alert alert-error">
+                <span class="alert-icon">✕</span>
+                <span>@mensagemErro</span>
+            </div>
+        }
+    </section>
+    <section class="card history-card">
+        <div class="card-header">
+            <div class="header-icon">☰</div>
+            <div>
+                <h2 class="card-title">Histórico de Cálculos</h2>
+                <p class="card-subtitle">Todos os cálculos armazenados na API</p>
+            </div>
+            <button class="btn-refresh" @onclick="CarregarHistorico" disabled="@carregandoHistorico" title="Atualizar">
+                <span class="@(carregandoHistorico ? "spin" : "")">⟳</span>
+            </button>
+            <button class="btn-limpar-tudo" @onclick="() => mostrarConfirmacao = true" disabled="@(limpando || historico.Count == 0)" title="Limpar todos os registros">
+                🗑 Limpar Tudo
+            </button>
+        </div>
+        @if (mostrarConfirmacao)
+        {
+            <div class="confirmacao-overlay">
+                <div class="confirmacao-box">
+                    <div class="confirmacao-icon">⚠</div>
+                    <h3>Limpar todo o histórico?</h3>
+                    <p>Essa ação irá apagar <strong>todos os @historico.Count registro(s)</strong> permanentemente. Não é possível desfazer.</p>
+                    <div class="confirmacao-actions">
+                        <button class="btn-cancelar" @onclick="() => mostrarConfirmacao = false" disabled="@limpando">
+                            Cancelar
+                        </button>
+                        <button class="btn-confirmar" @onclick="LimparTudo" disabled="@limpando">
+                            @if (limpando)
+                            {
+                                <span class="spinner-btn"></span>
+                                <span>Limpando...</span>
+                            }
+                            else
+                            {
+                                <span>Sim, limpar tudo</span>
+                            }
+                        </button>
+                    </div>
+                </div>
+            </div>
+        }
+        @if (carregandoHistorico)
+        {
+            <div class="table-loading">
+                <div class="loading-dots"><span></span><span></span><span></span></div>
+                <p>Carregando cálculos...</p>
+            </div>
+        }
+        else if (erroHistorico != null)
+        {
+            <div class="alert alert-error">
+                <span class="alert-icon">✕</span>
+                <span>@erroHistorico</span>
+            </div>
+        }
+        else if (historico.Count == 0)
+        {
+            <div class="table-empty">
+                <div class="empty-icon">∅</div>
+                <p>Nenhum cálculo armazenado ainda.</p>
+            </div>
+        }
+        else
+        {
+            <div class="table-wrapper">
+                <table class="calc-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Valor A</th>
+                            <th>Operação</th>
+                            <th>Valor B</th>
+                            <th>Resultado</th>
+                            <th>Data/Hora</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in historico.OrderByDescending(h => h.DataCalculo))
+                        {
+                            <tr class="@(idExcluindo == item.Id ? "row-removing" : "")">
+                                <td><span class="badge-id">#@item.Id</span></td>
+                                <td>@item.ValorA.ToString("F2")</td>
+                                <td><span class="op-chip">@GetSimbolo(item.Operacao)</span></td>
+                                <td>@item.ValorB.ToString("F2")</td>
+                                <td><strong class="result-value">@item.Resultado.ToString("F2")</strong></td>
+                                <td class="date-col">@item.DataCalculo.ToString("dd/MM/yyyy HH:mm:ss")</td>
+                                <td>
+                                    @if (idExcluindo == item.Id)
+                                    {
+                                        <span class="deleting-text">Excluindo...</span>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn-delete" @onclick="() => Excluir(item.Id)" title="Excluir registro #@item.Id">
+                                            🗑
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div class="table-footer">
+                @historico.Count registro(s) encontrado(s)
+            </div>
+        }
+    </section>
+
+</div>
+
+<style>
+    @@import url('https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600&family=Bricolage+Grotesque:wght@400;500;600;700&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    .app-wrapper {
+        font-family: 'Bricolage Grotesque', sans-serif;
+        min-height: 100vh;
+        background: #f4f3ef;
+        padding: 2.5rem 1.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+        max-width: 1100px;
+        margin: 0 auto;
+    }
+
+    .card {
+        background: #ffffff;
+        border-radius: 1.25rem;
+        border: 1.5px solid #e0ddd8;
+        overflow: hidden;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    }
+
+    .card-header {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 1.5rem 2rem;
+        border-bottom: 1.5px solid #e0ddd8;
+        background: #faf9f7;
+    }
+
+    .header-icon {
+        width: 44px; height: 44px;
+        background: #1a1a1a;
+        color: #fff;
+        border-radius: 0.75rem;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.3rem;
+        font-family: 'Geist Mono', monospace;
+        flex-shrink: 0;
+    }
+
+    .card-title {
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: #1a1a1a;
+        line-height: 1.2;
+    }
+
+    .card-subtitle {
+        font-size: 0.82rem;
+        color: #888;
+        margin-top: 0.1rem;
+        font-weight: 400;
+    }
+
+    .btn-cancelar {
+        padding: 0.7rem 1.5rem;
+        border: 1.5px solid #e0ddd8;
+        border-radius: 0.75rem;
+        background: #fff;
+        color: #555;
+        font-family: 'Bricolage Grotesque', sans-serif;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.18s;
+    }
+
+        .btn-cancelar:hover:not(:disabled) {
+            background: #f4f3ef;
+        }
+
+        .btn-cancelar:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+    .btn-confirmar {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.7rem 1.5rem;
+        border: none;
+        border-radius: 0.75rem;
+        background: #dc2626;
+        color: #fff;
+        font-family: 'Bricolage Grotesque', sans-serif;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.18s;
+    }
+
+    .btn-limpar-tudo {
+        background: transparent;
+        border: 1.5px solid #fca5a5;
+        color: #dc2626;
+        padding: 0.4rem 0.85rem;
+        border-radius: 0.6rem;
+        font-family: 'Bricolage Grotesque', sans-serif;
+        font-size: 0.8rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        white-space: nowrap;
+    }
+
+        .btn-limpar-tudo:hover:not(:disabled) {
+            background: #fef2f2;
+            box-shadow: 0 2px 8px rgba(220,38,38,0.15);
+        }
+
+        .btn-limpar-tudo:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+    .btn-refresh {
+        margin-left: auto;
+        background: transparent;
+        border: 1.5px solid #e0ddd8;
+        border-radius: 0.6rem;
+        width: 38px; height: 38px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.1rem;
+        cursor: pointer;
+        color: #555;
+        transition: all 0.2s;
+        flex-shrink: 0;
+    }
+    .btn-refresh:hover { background: #f0ede8; border-color: #ccc; }
+    .btn-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+    .spin { display: inline-block; animation: spin 0.8s linear infinite; }
+    @@keyframes spin { to { transform: rotate(360deg); } }
+
+    .calc-card > *:not(.card-header) { padding: 0 2rem; }
+    .calc-card > .form-grid { padding-top: 1.75rem; }
+    .calc-card > .btn-calcular,
+    .calc-card > .alert { padding-left: 2rem; padding-right: 2rem; }
+    .calc-card > .field-group:last-of-type { padding-bottom: 0; }
+
+    .form-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.25rem;
+        margin-bottom: 1.25rem;
+    }
+
+    .field-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        padding-bottom: 0;
+        margin-bottom: 1.25rem;
+    }
+
+    .field-label {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: #444;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .field-input {
+        font-family: 'Geist Mono', monospace;
+        font-size: 1rem;
+        padding: 0.7rem 0.9rem;
+        border: 1.5px solid #d8d5cf;
+        border-radius: 0.7rem;
+        background: #faf9f7;
+        color: #1a1a1a;
+        outline: none;
+        transition: border-color 0.2s, box-shadow 0.2s;
+        width: 100%;
+    }
+    .field-input:focus { border-color: #1a1a1a; box-shadow: 0 0 0 3px rgba(26,26,26,0.08); background: #fff; }
+    .field-input.input-error { border-color: #e53e3e; background: #fff8f8; }
+    .field-input.input-error:focus { box-shadow: 0 0 0 3px rgba(229,62,62,0.1); }
+
+    .field-error {
+        font-size: 0.78rem;
+        color: #e53e3e;
+        font-weight: 500;
+    }
+
+    .op-buttons {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 0.75rem;
+        margin-top: 0.2rem;
+    }
+
+    .op-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.25rem;
+        padding: 0.9rem 0.5rem;
+        border: 1.5px solid #d8d5cf;
+        border-radius: 0.85rem;
+        background: #faf9f7;
+        cursor: pointer;
+        transition: all 0.18s ease;
+        color: #444;
+    }
+    .op-btn:hover { border-color: #aaa; background: #f0ede8; }
+    .op-btn-active {
+        border-color: #1a1a1a;
+        background: #1a1a1a;
+        color: #fff;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.2);
+    }
+    .op-symbol {
+        font-family: 'Geist Mono', monospace;
+        font-size: 1.4rem;
+        font-weight: 600;
+        line-height: 1;
+    }
+    .op-label {
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        opacity: 0.7;
+    }
+    .op-btn-active .op-label { opacity: 0.8; }
+
+    .div-button{
+        display:flex;
+        justify-content:center;
+        align-items:center;
+    }
+
+    .btn-calcular {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        width: 30%;
+        padding: 0.95rem;
+        margin: 0.5rem 0 1.5rem;
+        background: #1a1a1a;
+        color: #fff;
+        border: none;
+        border-radius: 0.85rem;
+        font-family: 'Bricolage Grotesque', sans-serif;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s;
+        letter-spacing: 0.01em;
+    }
+    .btn-calcular:hover:not(:disabled) { background: #2d2d2d; box-shadow: 0 4px 18px rgba(0,0,0,0.2); transform: translateY(-1px); }
+    .btn-calcular:active:not(:disabled) { transform: translateY(0); }
+    .btn-calcular:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .spinner-btn {
+        width: 16px; height: 16px;
+        border: 2px solid rgba(255,255,255,0.3);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+    }
+
+    .alert {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.7rem;
+        padding: 0.9rem 1.1rem;
+        border-radius: 0.75rem;
+        font-size: 0.88rem;
+        font-weight: 500;
+        margin-bottom: 1.5rem;
+        animation: slideIn 0.25s ease;
+    }
+    @@keyframes slideIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+
+    .alert-success { background: #f0fdf4; border: 1.5px solid #86efac; color: #166534; }
+    .alert-error   { background: #fff5f5; border: 1.5px solid #fca5a5; color: #991b1b; }
+
+    .alert-icon {
+        font-size: 1rem;
+        font-weight: 700;
+        flex-shrink: 0;
+        margin-top: 0.05rem;
+    }
+
+    .history-card > *:not(.card-header) { padding: 0 1.5rem; }
+
+    .table-wrapper {
+        overflow-x: auto;
+        padding-top: 1rem;
+        padding-bottom: 0;
+    }
+
+    .calc-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+
+    .calc-table thead tr {
+        background: #f4f3ef;
+    }
+
+    .calc-table th {
+        text-align: left;
+        padding: 0.7rem 1rem;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #777;
+        border-bottom: 1.5px solid #e0ddd8;
+        white-space: nowrap;
+    }
+
+    .calc-table td {
+        padding: 0.85rem 1rem;
+        border-bottom: 1px solid #eeebe6;
+        color: #333;
+        font-family: 'Geist Mono', monospace;
+        font-size: 0.85rem;
+        vertical-align: middle;
+    }
+
+    .calc-table tbody tr {
+        transition: background 0.15s;
+    }
+    .calc-table tbody tr:hover { background: #faf9f7; }
+    .calc-table tbody tr:last-child td { border-bottom: none; }
+
+    .row-removing {
+        opacity: 0.5;
+        background: #fff5f5 !important;
+    }
+
+    .badge-id {
+        background: #eeebe6;
+        color: #555;
+        padding: 0.2rem 0.5rem;
+        border-radius: 0.4rem;
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+
+    .op-chip {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px; height: 30px;
+        background: #1a1a1a;
+        color: #fff;
+        border-radius: 0.4rem;
+        font-weight: 700;
+        font-size: 1rem;
+    }
+
+    .result-value {
+        color: #166534;
+        font-weight: 700;
+    }
+
+    .date-col {
+        color: #888;
+        font-size: 0.78rem;
+        white-space: nowrap;
+    }
+
+    .btn-delete {
+        background: transparent;
+        border: 1.5px solid #fca5a5;
+        color: #dc2626;
+        padding: 0.3rem 0.55rem;
+        border-radius: 0.5rem;
+        font-size: 0.9rem;
+        cursor: pointer;
+        transition: all 0.18s;
+        display: flex; align-items: center;
+    }
+    .btn-delete:hover { background: #fef2f2; border-color: #ef4444; box-shadow: 0 2px 8px rgba(220,38,38,0.15); }
+
+    .deleting-text {
+        font-size: 0.75rem;
+        color: #dc2626;
+        font-style: italic;
+    }
+
+    .table-footer {
+        padding: 0.75rem 1rem;
+        font-size: 0.78rem;
+        color: #aaa;
+        text-align: right;
+        border-top: 1px solid #eeebe6;
+        margin-top: 0.25rem;
+    }
+
+    .table-loading, .table-empty {
+        text-align: center;
+        padding: 3rem 1rem;
+        color: #aaa;
+        font-size: 0.9rem;
+    }
+
+    .empty-icon {
+        font-size: 2.5rem;
+        margin-bottom: 0.75rem;
+        opacity: 0.3;
+    }
+
+    .loading-dots {
+        display: flex; justify-content: center; gap: 6px;
+        margin-bottom: 0.75rem;
+    }
+    .loading-dots span {
+        width: 8px; height: 8px;
+        background: #ccc;
+        border-radius: 50%;
+        animation: bounce 1s infinite;
+    }
+    .loading-dots span:nth-child(2) { animation-delay: 0.15s; }
+    .loading-dots span:nth-child(3) { animation-delay: 0.3s; }
+    @@keyframes bounce {
+        0%, 80%, 100% { transform: translateY(0); }
+        40% { transform: translateY(-8px); }
+    }
+
+    @@media (max-width: 600px) {
+        .app-wrapper { padding: 1.25rem 1rem; }
+        .form-grid { grid-template-columns: 1fr; }
+        .op-buttons { grid-template-columns: repeat(2, 1fr); }
+        .card-header { padding: 1.25rem; }
+        .date-col { display: none; }
+    }
+</style>
+
+@code {
+
+    private string valorAStr = "";
+    private string valorBStr = "";
+    private string operacaoSelecionada = "";
+
+    private string? erroValorA;
+    private string? erroValorB;
+    private string? erroOperacao;
+
+    private string? mensagemSucesso;
+    private string? mensagemErro;
+    private bool salvando = false;
+
+    private List<CalculoModel> historico = new();
+    private bool carregandoHistorico = false;
+    private string? erroHistorico;
+    private int? idExcluindo;
+    private bool mostrarConfirmacao = false;
+    private bool limpando = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CarregarHistorico();
+    }
+
+    private void ValidarA(ChangeEventArgs e)
+    {
+        valorAStr = e.Value?.ToString() ?? "";
+        erroValorA = ValidarNumero(valorAStr, "Valor A");
+    }
+
+    private void ValidarB(ChangeEventArgs e)
+    {
+        valorBStr = e.Value?.ToString() ?? "";
+        erroValorB = ValidarNumero(valorBStr, "Valor B");
+    }
+
+    private string? ValidarNumero(string valor, string campo)
+    {
+        if (string.IsNullOrWhiteSpace(valor))
+            return $"{campo} não pode ficar em branco.";
+
+        if (!System.Text.RegularExpressions.Regex.IsMatch(valor.Trim(), @"^-?\d+(\.\d+)?$"))
+            return $"{campo} deve conter apenas números. Não use letras ou caracteres especiais.";
+
+        return null;
+    }
+
+    public async Task Calcular()
+    {
+        mensagemSucesso = null;
+        mensagemErro = null;
+
+        erroValorA = ValidarNumero(valorAStr, "Valor A");
+        erroValorB = ValidarNumero(valorBStr, "Valor B");
+        erroOperacao = string.IsNullOrEmpty(operacaoSelecionada)
+            ? "Selecione uma operação matemática."
+            : null;
+
+        if (erroValorA != null || erroValorB != null || erroOperacao != null)
+            return;
+
+        var a = double.Parse(valorAStr.Trim(), System.Globalization.CultureInfo.InvariantCulture);
+        var b = double.Parse(valorBStr.Trim(), System.Globalization.CultureInfo.InvariantCulture);
+
+        if (operacaoSelecionada == "/" && b == 0)
+        {
+            erroValorB = "Valor B não pode ser zero para divisão.";
+            return;
+        }
+
+        var resultado = operacaoSelecionada switch
+        {
+            "+" => a + b,
+            "-" => a - b,
+            "*" => a * b,
+            "/" => a / b,
+            _ => 0.0
+        };
+
+        salvando = true;
+
+        try
+        {
+            var request = new CalculoRequest
+            {
+                ValorA = a,
+                ValorB = b,
+                Operacao = operacaoSelecionada,
+                Resultado = resultado,
+                DataCalculo = DateTime.Now
+            };
+
+            var retorno = await CalculadoraService.SalvarCalculo(request);
+
+            if (retorno != null)
+            {
+                mensagemSucesso = $"Dados armazenados com sucesso, ID de Armazenamento {retorno.Id}";
+
+                valorAStr = "";
+                valorBStr = "";
+
+                await CarregarHistorico();
+            }
+        }
+        catch (Exception ex)
+        {
+            mensagemErro = $"Erro ao salvar: {ex.Message}";
+        }
+        finally
+        {
+            salvando = false;
+        }
+    }
+
+    private async Task CarregarHistorico()
+    {
+        carregandoHistorico = true;
+        erroHistorico = null;
+
+        try
+        {
+            historico = await CalculadoraService.BuscarTodos();
+        }
+        catch (Exception ex)
+        {
+            erroHistorico = $"Erro ao carregar histórico: {ex.Message}";
+        }
+        finally
+        {
+            carregandoHistorico = false;
+        }
+    }
+
+    private async Task Excluir(int id)
+    {
+        idExcluindo = id;
+
+        try
+        {
+            await CalculadoraService.Excluir(id);
+            historico.RemoveAll(h => h.Id == id);
+        }
+        catch (Exception ex)
+        {
+            mensagemErro = $"Erro ao excluir registro #{id}: {ex.Message}";
+        }
+        finally
+        {
+            idExcluindo = null;
+        }
+    }
+
+    private async Task LimparTudo()
+    {
+        limpando = true;
+        try
+        {
+            await CalculadoraService.LimparTudo();
+            historico.Clear();
+            mostrarConfirmacao = false;
+            mensagemSucesso = "Histórico limpo com sucesso!";
+            mensagemErro = null;
+        }
+        catch (Exception ex)
+        {
+            mensagemErro = $"Erro ao limpar histórico: {ex.Message}";
+            mostrarConfirmacao = false;
+        }
+        finally
+        {
+            limpando = false;
+        }
+    }
+
+    private string GetSimbolo(string op) => op switch
+    {
+        "+" => "+",
+        "-" => "−",
+        "*" => "×",
+        "/" => "÷",
+        _ => op
+    };
+}
