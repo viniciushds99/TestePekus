@@ -26,9 +26,9 @@ namespace CalculadoraPekus.Application.Services
             _calculadoraRepository.Deletar(id);
         }
 
-        public List<CalculoModel> ListaCalculos()
+        public async Task<List<CalculoModel>> ListaCalculos()
         {
-           return _calculadoraRepository.Select();
+           return await _calculadoraRepository.Select();
         }
 
         public void DeletaRegistros()
